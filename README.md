@@ -31,4 +31,4 @@ Then visit `http://localhost:8000`.
 
 ## Contributing
 
-See `CONTRIBUTING.md` for information on how to add or update Git scenarios.
+See `CONTRIBUTING.md` for information on how to add or update Git scenarios.💖
