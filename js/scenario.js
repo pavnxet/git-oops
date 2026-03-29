@@ -150,6 +150,71 @@ function renderTabs(steps, container) {
   });
 }
 
+
+const commandExplanations = {
+  'git reset': 'Undo commits or unstage files.',
+  'git commit': 'Save your staged changes.',
+  'git add': 'Stage files for the next commit.',
+  'git branch': 'List, create, rename, or delete branches.',
+  'git checkout': 'Switch to a branch, commit, or tag.',
+  'git rm': 'Remove files from Git tracking.',
+  'git filter-repo': 'Rewrite entire repository history (advanced).',
+  'git push': 'Upload local commits to the remote repository.',
+  'git reflog': 'View a log of all branch updates (your safety net).',
+  'git stash': 'Temporarily hide uncommitted changes.',
+  'git pull': 'Download changes from the remote and merge them.',
+  'git remote': 'Manage remote repository connections.',
+  'git merge': 'Combine changes from one branch into another.',
+  'git rebase': 'Reapply commits on top of another base tip.',
+  'git restore': 'Discard changes or unstage files.',
+  'git bisect': 'Use binary search to find the commit that introduced a bug.',
+  'git fsck': 'Verify the integrity of Git objects.',
+  'git show': 'View the changes introduced by a specific commit.',
+  'git cherry-pick': 'Copy a specific commit from another branch.',
+  'git clean': 'Remove untracked files from the working directory.',
+  'git fetch': 'Download changes from the remote without merging.',
+  'git tag': 'Create, list, or delete tags.',
+  'git gc': 'Clean up unnecessary files and optimize the repository.',
+  'git lfs': 'Manage large files using Git Large File Storage.',
+  'git config': 'Get or set Git configuration options.',
+  'git blame': 'Show what revision and author last modified each line of a file.',
+  'git worktree': 'Manage multiple working trees attached to the same repository.',
+  'git status': 'Show the working tree status.',
+  'git revert': 'Create a new commit that undoes the changes of a previous commit.'
+};
+
+function getCommandBreakdown(commandsText) {
+  const foundCommands = new Set();
+  const sortedKeys = Object.keys(commandExplanations).sort((a,b) => b.length - a.length);
+  commandsText.split('\n').forEach(line => {
+    // Strip comments
+    if (line.trim().startsWith('#')) return;
+
+    for (const cmd of sortedKeys) {
+      if (line.includes(cmd)) {
+        foundCommands.add(cmd);
+        break; // Stop after finding the first matching base command in a line
+      }
+    }
+  });
+
+  if (foundCommands.size === 0) return '';
+
+  let breakdownHtml = `<div class="command-breakdown" style="margin-top: 1rem; padding: 1rem; background-color: var(--color-bg); border-radius: var(--border-radius-card); border: 1px solid var(--color-border);">
+    <h4 style="margin-bottom: 0.5rem; color: var(--color-primary); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Commands used:</h4>
+    <ul style="list-style-type: none; padding: 0;">`;
+
+  foundCommands.forEach(cmd => {
+    breakdownHtml += `<li style="margin-bottom: 0.5rem; font-size: 0.875rem; display: flex; align-items: baseline; gap: 0.5rem;">
+      <code style="background-color: var(--color-card-bg); padding: 0.125rem 0.375rem; border-radius: 4px; border: 1px solid var(--color-border); font-family: var(--font-code); color: var(--color-primary); font-size: 0.8em; white-space: nowrap;">${cmd}</code>
+      <span style="color: var(--color-text-muted); line-height: 1.4;">${commandExplanations[cmd]}</span>
+    </li>`;
+  });
+
+  breakdownHtml += `</ul></div>`;
+  return breakdownHtml;
+}
+
 function renderStepContent(step, index, isActive) {
   const activeClass = isActive ? 'active' : '';
   const commandsText = step.commands.join('\n');
@@ -179,6 +244,7 @@ function renderStepContent(step, index, isActive) {
       </div>
       <div class="explanation">
         <p>${escapeHTML(step.explanation)}</p>
+        ${getCommandBreakdown(commandsText)}
       </div>
     </div>
   `;
