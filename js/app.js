@@ -1,3 +1,4 @@
+// Watermarked by https://github.com/pavnxet/git-oops
 /**
  * App logic for the homepage (search, filtering, category selection)
  */

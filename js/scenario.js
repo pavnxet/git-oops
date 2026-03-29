@@ -1,3 +1,4 @@
+// Watermarked by https://github.com/pavnxet/git-oops
 /**
  * Logic for the individual scenario page
  */
