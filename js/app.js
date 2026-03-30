@@ -28,8 +28,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
   const fuse = new Fuse(data, fuseOptions);
 
+
   let currentCategory = null;
   let currentSearchTerm = '';
+
+  // AI State variables
+  let aiModeEnabled = false;
+  let aiModelLoading = false;
+  let aiModelReady = false;
+  let featureExtractor = null;
+  let scenarioEmbeddings = [];
+
 
   // Initialization
   initialize();
@@ -84,6 +93,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     });
 
+
     clearFilterBtn.addEventListener('click', () => {
       currentCategory = null;
       currentSearchTerm = '';
@@ -92,6 +102,148 @@ document.addEventListener('DOMContentLoaded', async () => {
       updateURL();
       renderResults();
     });
+
+    // AI Toggle Event Listener
+    const aiToggle = document.getElementById('ai-toggle');
+    const aiStatus = document.getElementById('ai-status');
+    const aiModal = document.getElementById('ai-modal');
+    const modalCancel = document.getElementById('modal-cancel');
+    const modalAccept = document.getElementById('modal-accept');
+
+    if (aiToggle) {
+      aiToggle.addEventListener('change', async (e) => {
+        const isChecked = e.target.checked;
+
+        if (isChecked && !aiModelReady && !aiModelLoading) {
+          // Check expiration first before proceeding
+          await checkCacheExpiration();
+          // Show modal to confirm download
+          aiModal.classList.remove('hidden');
+        } else if (isChecked && aiModelReady) {
+          aiModeEnabled = true;
+          renderResults();
+        } else if (!isChecked) {
+          aiModeEnabled = false;
+          renderResults();
+        }
+      });
+
+      modalCancel.addEventListener('click', () => {
+        aiModal.classList.add('hidden');
+        aiToggle.checked = false;
+      });
+
+      modalAccept.addEventListener('click', async () => {
+        aiModeEnabled = true;
+
+        // Hide modal actions and show progress
+        document.getElementById('modal-actions').classList.add('hidden');
+        document.getElementById('progress-container').classList.remove('hidden');
+
+        await initAI();
+      });
+    }
+
+  }
+
+
+  async function checkCacheExpiration() {
+    const cacheDateStr = localStorage.getItem('ai_model_date');
+    if (cacheDateStr) {
+      const cacheDate = parseInt(cacheDateStr, 10);
+      const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+      if (Date.now() - cacheDate > SEVEN_DAYS_MS) {
+        console.log("AI Model cache expired. Clearing...");
+        localStorage.removeItem('ai_model_date');
+        try {
+            await caches.delete('transformers-cache');
+        } catch(e) {
+            console.error("Failed to delete cache:", e);
+        }
+      }
+    }
+  }
+
+  async function initAI() {
+    if (aiModelReady || aiModelLoading) return;
+
+    aiModelLoading = true;
+    const aiStatus = document.getElementById('ai-status');
+    const aiModal = document.getElementById('ai-modal');
+    const progressContainer = document.getElementById('progress-container');
+    const progressFill = document.getElementById('progress-fill');
+    const progressText = document.getElementById('progress-text');
+
+    if (aiStatus) aiStatus.textContent = "(Loading model...)";
+
+    try {
+      window.transformers.env.allowLocalModels = false;
+      window.transformers.env.useBrowserCache = true;
+
+      featureExtractor = await window.transformers.pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+        progress_callback: (info) => {
+          if (info.status === 'progress' || info.status === 'downloading') {
+            const progress = info.progress !== undefined ? info.progress : 0;
+            const percentage = Math.round(progress);
+            if (progressFill) progressFill.style.width = `${percentage}%`;
+            if (progressText) progressText.textContent = `Downloading... ${percentage}%`;
+          } else if (info.status === 'done') {
+            if (progressFill) progressFill.style.width = `100%`;
+            if (progressText) progressText.textContent = `Processing model...`;
+          }
+        }
+      });
+
+      // Save current date to localStorage to manage 7-day expiration
+      localStorage.setItem('ai_model_date', Date.now().toString());
+
+      if (aiStatus) aiStatus.textContent = "(Generating embeddings...)";
+      if (progressText) progressText.textContent = "Generating embeddings...";
+
+      await generateScenarioEmbeddings();
+
+      aiModelReady = true;
+      if (aiStatus) aiStatus.textContent = "(Ready)";
+
+      // Hide Modal completely and reset states
+      if (aiModal) aiModal.classList.add('hidden');
+      document.getElementById('modal-actions').classList.remove('hidden');
+      progressContainer.classList.add('hidden');
+      if (progressFill) progressFill.style.width = `0%`;
+
+      setTimeout(() => {
+        if (aiStatus) aiStatus.textContent = "";
+      }, 3000);
+
+      renderResults();
+    } catch (err) {
+      console.error("Error initializing AI model:", err);
+      if (aiStatus) aiStatus.textContent = "(Error loading model)";
+      document.getElementById('ai-toggle').checked = false;
+      aiModeEnabled = false;
+
+      // Reset UI on error
+      if (progressText) progressText.textContent = "Error occurred. Check console.";
+      setTimeout(() => {
+          if (aiModal) aiModal.classList.add('hidden');
+          document.getElementById('modal-actions').classList.remove('hidden');
+          progressContainer.classList.add('hidden');
+      }, 2000);
+    } finally {
+      aiModelLoading = false;
+    }
+  }
+
+  async function generateScenarioEmbeddings() {
+    scenarioEmbeddings = [];
+    for (const scenario of data) {
+      const textToEmbed = `${scenario.title} ${scenario.tags.join(' ')} ${scenario.description}`;
+      const output = await featureExtractor(textToEmbed, { pooling: 'mean', normalize: true });
+      scenarioEmbeddings.push({
+        id: scenario.id,
+        embedding: Array.from(output.data)
+      });
+    }
   }
 
   function updateCategoryUI(category) {
@@ -122,13 +274,60 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.history.replaceState({}, '', url);
   }
 
-  function getFilteredResults() {
+
+  function cosineSimilarity(vecA, vecB) {
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < vecA.length; i++) {
+      dotProduct += vecA[i] * vecB[i];
+      normA += vecA[i] * vecA[i];
+      normB += vecB[i] * vecB[i];
+    }
+    if (normA === 0 || normB === 0) return 0;
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  }
+
+  async function getFilteredResults() {
     let results = data;
 
     // Apply search filter
     if (currentSearchTerm.trim() !== '') {
-      const fuseResults = fuse.search(currentSearchTerm);
-      results = fuseResults.map(result => result.item);
+      if (aiModeEnabled && aiModelReady && featureExtractor) {
+        // AI Semantic Search
+        try {
+          const queryEmbeddingOutput = await featureExtractor(currentSearchTerm, { pooling: 'mean', normalize: true });
+          const queryEmbedding = Array.from(queryEmbeddingOutput.data);
+
+          const scoredResults = results.map(scenario => {
+            const scenarioEmbObj = scenarioEmbeddings.find(se => se.id === scenario.id);
+            if (!scenarioEmbObj) return { scenario, score: -1 };
+            const score = cosineSimilarity(queryEmbedding, scenarioEmbObj.embedding);
+            return { scenario, score };
+          });
+
+          scoredResults.sort((a, b) => b.score - a.score);
+
+          // Filter to top relevance threshold
+          const threshold = 0.3; // Minimum similarity threshold
+          results = scoredResults
+            .filter(item => item.score > threshold)
+            .map(item => item.scenario);
+
+          // If no results above threshold, show top 3 anyway
+          if (results.length === 0) {
+              results = scoredResults.slice(0, 3).map(item => item.scenario);
+          }
+        } catch (e) {
+            console.error("AI Search Failed, falling back to keyword search", e);
+            const fuseResults = fuse.search(currentSearchTerm);
+            results = fuseResults.map(result => result.item);
+        }
+      } else {
+        // Fallback to Fuse Keyword Search
+        const fuseResults = fuse.search(currentSearchTerm);
+        results = fuseResults.map(result => result.item);
+      }
     }
 
     // Apply category filter
@@ -139,8 +338,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     return results;
   }
 
-  function renderResults() {
-    const results = getFilteredResults();
+  async function renderResults() {
+    const results = await getFilteredResults();
 
     // Update count and clear filter button visibility
     resultsCount.textContent = `Showing ${results.length} scenario${results.length !== 1 ? 's' : ''}`;
